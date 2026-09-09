@@ -27,7 +27,7 @@ else:
 
 # %%
 img_size = 512
-batch_size = 16
+batch_size = 12
 # transform = transforms.Compose([transforms.Resize((img_size+img_size//4)),
 #                                 transforms.RandomResizedCrop(size = (img_size, img_size), scale = (0.8, 1)),
 #                                 transforms.ToTensor(),
@@ -49,8 +49,7 @@ dir_val = 'Dataset/valestimatesW2L'
 upattn = [False, False, False]
 downattn = [False, False, False]
 lam = 0.01
-chkpt_name = 'ddpm_T1000_512x512_Linear_L10point01FidelityLoss.pth'
-
+chkpt_name = 'ddpm_T1000_512x512_Linear_L1_FL_0p01.pth'
 
 dataset = Wide2LongDatasetAfterInitialEstimate(dir_concatdataset = dir_concatdataset, dir_estimate = dir_estimates, transform_concatdataset = transform_concatdataset, transform_estimate = transform_estimate,
                                                transform_aug = transform_aug)
@@ -58,11 +57,16 @@ dataloader = DataLoader(dataset = dataset, batch_size = batch_size, shuffle = Tr
 
 num_epochs = 10000
 model = UNet(device = device, c_in = 6, c_out = 3, time_dim = 256, upattn = upattn, downattn = downattn, img_size = img_size).to(device = device)
+
 #Load chechpoint if found
 if os.path.exists(chkpt_name):
-    print("Loading Checkpoint: ", chkpt_name)
-    chkpt = torch.load(chkpt_name, map_location = device)
+    print("Loading Checkpoint:", chkpt_name)
+
+    chkpt = torch.load(chkpt_name, map_location='cpu')
     model.load_state_dict(chkpt['model_state_dict'])
+
+    del chkpt
+    torch.cuda.empty_cache()
 
 diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
 diffusion_sample = diffusion_sigmoidbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3, a = 8)
@@ -139,11 +143,11 @@ for epoch in range(num_epochs):
             'optimizer_state_dict': optimizer.state_dict()
             },chkpt_name)
         print('Checkpoint Saved')
-        print('Starting Validaion')
-        model.eval()
-        diffusion_sample.sample(model = model, test_dir = dir_val, transform = transform_estimate)
-        print("Validation Complete")
-        model.train()
+        # print('Starting Validaion')
+        # model.eval()
+        # diffusion_sample.sample(model = model, test_dir = dir_val, transform = transform_estimate)
+        # print("Validation Complete")
+        # model.train()
     
     if(lowest_loss_per_epoch<0.0145):
         break

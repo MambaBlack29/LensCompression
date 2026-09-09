@@ -1,3 +1,4 @@
-Dataset
-Generated_Samples_LinearTrainSigmoidSample(a=8)L10.01FidelityLoss
+*.jpg
 *.png
+*.pth
+__pycache__
