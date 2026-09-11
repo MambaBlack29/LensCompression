@@ -27,6 +27,10 @@ class Diffusion:
     def return_alpha_hat(self):
         alpha_hat =  self.alpha_hat
         return alpha_hat
+
+    def return_beta(self):
+        beta = self.beta
+        return beta
         
     #function to generate noisy images at timestep t    
     def noise_images(self, x, t):

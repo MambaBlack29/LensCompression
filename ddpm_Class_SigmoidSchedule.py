@@ -71,7 +71,7 @@ class Diffusion:
                 cond = cond.to(self.device)
                 x = torch.randn((1, 3, self.img_size, self.img_size)).to(self.device)
                 # print("x shape:", x.shape, "cond shape:", cond.shape)
-                for i in tqdm(reversed(range(0, self.noise_steps)), position = 0):
+                for i in tqdm(reversed(range(0, self.noise_steps)), position = 0, disable=True):
                     t = (torch.ones(1)*i).long().to(self.device)
                     # t = torch.full((n,), i, dtype=torch.long, device=self.device)
                     '''model will predict the residual by reverse sampling through noise steps'''
@@ -132,5 +132,5 @@ class Diffusion:
                         xR.close()
                         xB.close()
                         xG.close()
-                        print(f"Image and RGB residuals saved for {imgname}")
+                        print(f"Image and RGB residuals saved for {imgname} at t={i}")
              
