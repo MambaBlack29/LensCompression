@@ -88,7 +88,10 @@ lowest_loss_per_epoch = float('inf')
 for epoch in range(num_epochs):
     print("Epoch No: ", epoch)
     losses=[]
-    pbar = tqdm(dataloader)
+    without_fl=[]
+    fl=[]
+    # pbar = tqdm(dataloader)
+    pbar = dataloader
     for i, images in enumerate(pbar):
         # images = images.to(device)
         # t = diffusion.sample_timesteps(n = images.shape[0]).to(device)
@@ -125,6 +128,8 @@ for epoch in range(num_epochs):
         loss = (weights*mse).mean()
         fidelity_loss = fidelity(recon, GT).mean()
         # loss = loss + grayworldloss(residual = residual)    #FOR INCORPORATING GRAY WORLD LOSS
+        without_fl.append(loss.item())
+        fl.append(lam*fidelity_loss.item())
         loss = loss + lam*fidelity_loss    #FOR INCORPORATING FIDELITY LOSS
 
         losses.append(loss.item())
@@ -134,7 +139,7 @@ for epoch in range(num_epochs):
         optimizer.step()
         scheduler.step()
     
-    print("Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)   
+    print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
     if(np.mean(losses)<lowest_loss_per_epoch):    
         lowest_loss_per_epoch = np.mean(losses)
         torch.save(
