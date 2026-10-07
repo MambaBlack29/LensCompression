@@ -11,6 +11,7 @@ from grayworldloss import grayworldloss
 from UNET import UNet
 from ddpm_Class_LinearSchedule import Diffusion as diffusion_linearbeta
 from ddpm_Class_SigmoidSchedule import Diffusion as diffusion_sigmoidbeta
+from ddpm_Class_CosineSchedule import Diffusion as diffusion_cosinebeta
 from dataset import Wide2LongDatasetAfterInitialEstimate
 
 #Checking for GPU support
@@ -49,13 +50,13 @@ dir_val = 'Dataset/valestimatesW2L'
 upattn = [False, False, False]
 downattn = [False, False, False]
 lam = 0.01
-chkpt_name = 'ddpm_T1000_512x512_Linear_L1_FL_0p01.pth'
+chkpt_name = 'checkpoints/ddpm_T1000_512x512_Cosine_L2.pth'
 
 dataset = Wide2LongDatasetAfterInitialEstimate(dir_concatdataset = dir_concatdataset, dir_estimate = dir_estimates, transform_concatdataset = transform_concatdataset, transform_estimate = transform_estimate,
                                                transform_aug = transform_aug)
 dataloader = DataLoader(dataset = dataset, batch_size = batch_size, shuffle = True)
 
-num_epochs = 10000
+num_epochs = 4000
 model = UNet(device = device, c_in = 6, c_out = 3, time_dim = 256, upattn = upattn, downattn = downattn, img_size = img_size).to(device = device)
 
 #Load chechpoint if found
@@ -68,15 +69,16 @@ if os.path.exists(chkpt_name):
     del chkpt
     torch.cuda.empty_cache()
 
-diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
+# diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
+diffusion_train = diffusion_cosinebeta(noise_steps=1000, img_size=img_size, device=device, s=0.008)
 diffusion_sample = diffusion_sigmoidbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3, a = 8)
 l = len(dataloader)
 print('Dataset Length:', l*batch_size)
 
 optimizer = optim.AdamW(model.parameters(), lr = 1e-4, weight_decay = 1e-4)
 scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer = optimizer, T_max = num_epochs*l)
-# criterion = nn.MSELoss(reduction = 'none')  #dont do any mean, just return (x-y)**2
-criterion = nn.L1Loss(reduction = 'none')
+criterion = nn.MSELoss(reduction = 'none')  #dont do any mean, just return (x-y)**2
+# criterion = nn.L1Loss(reduction = 'none')
 fidelity = nn.MSELoss(reduction = 'none')
 # diffusion = Diffusion(img_size = img_size, device = device, noise_steps = 300, beta_start = 1e-4, beta_end = 5e-3)
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -126,11 +128,11 @@ for epoch in range(num_epochs):
         weights = 1/((snr+1)**gamma)
         weights = weights[:, None, None, None]
         loss = (weights*mse).mean()
-        fidelity_loss = fidelity(recon, GT).mean()
+        # fidelity_loss = fidelity(recon, GT).mean()
         # loss = loss + grayworldloss(residual = residual)    #FOR INCORPORATING GRAY WORLD LOSS
-        without_fl.append(loss.item())
-        fl.append(lam*fidelity_loss.item())
-        loss = loss + lam*fidelity_loss    #FOR INCORPORATING FIDELITY LOSS
+        # without_fl.append(loss.item())
+        # fl.append(lam*fidelity_loss.item())
+        # loss = loss + lam*fidelity_loss    #FOR INCORPORATING FIDELITY LOSS
 
         losses.append(loss.item())
         
@@ -139,7 +141,8 @@ for epoch in range(num_epochs):
         optimizer.step()
         scheduler.step()
     
-    print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
+    print("Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
+    # print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
     if(np.mean(losses)<lowest_loss_per_epoch):    
         lowest_loss_per_epoch = np.mean(losses)
         torch.save(
@@ -153,9 +156,6 @@ for epoch in range(num_epochs):
         # diffusion_sample.sample(model = model, test_dir = dir_val, transform = transform_estimate)
         # print("Validation Complete")
         # model.train()
-    
-    if(lowest_loss_per_epoch<0.0145):
-        break
         
 print('DDPM Training Complete.')
     

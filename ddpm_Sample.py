@@ -1,43 +1,73 @@
-import os
-import PIL
+# %%
 import torch
-from UNET import UNet
-from ddpm_Class_SigmoidSchedule import Diffusion
-# from ddpm_Class_LinearSchedule import Diffusion
-# from ddpm_Class_SigmoidSchedule_noclamping import Diffusion
+import os
 import torchvision.transforms as transforms
+from UNET import UNet
+from ddpm_Class_CosineSchedule import Diffusion as diffusion_cosbeta
+# from ddpm_Class_SigmoidSchedule import Diffusion as diffusion_sigmoidbeta
 
-#Checking for GPU support
 if torch.cuda.is_available():
-    print("Running on GPU.\nGPU name:", torch.cuda.get_device_name(0))
-    print("CUDA version:", torch.version.cuda)
-    print("Device count:", torch.cuda.device_count())
     device = torch.device('cuda:0')
-    print("Device:",device)
-    
+    print("Running on GPU:", torch.cuda.get_device_name(0))
 else:
-    print("GPU not available!!!")
+    device = 'cpu'
+    print("Running on CPU.")
 
-        
-# %%   
-#Defining the Unet noise predictor
-in_channels = 6
+# %%
 img_size = 512
-
-transform = transforms.Compose([transforms.ToTensor(),
-                                transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-test_dir = 'Dataset/testestimatesW2L'
+dir_val = 'Dataset/valestimatesW2L'
+chkpt_name = 'ddpm_T1000_512x512_Cosine_L2.pth'
 
 upattn = [False, False, False]
 downattn = [False, False, False]
-model = UNet(device = device, img_size = img_size, time_dim = 256, downattn = downattn, upattn = upattn, c_in = 6, c_out = 3).to(device)
 
-checkpoint = torch.load('ddpm_T1000_512x512_Linear_L10point01FidelityLoss.pth')
-print("Loading: ", 'ddpm_T1000_512x512_Linear_L10point01FidelityLoss.pth')
+transform_estimate = transforms.Compose([
+    transforms.Resize((img_size, img_size)),
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 
-model.load_state_dict(checkpoint['model_state_dict'])
+model = UNet(
+    device=device,
+    c_in=6,
+    c_out=3,
+    time_dim=256,
+    upattn=upattn,
+    downattn=downattn,
+    img_size=img_size
+).to(device)
+
+if not os.path.exists(chkpt_name):
+    raise FileNotFoundError(f"Checkpoint not found: {chkpt_name}")
+
+print("Loading Checkpoint:", chkpt_name)
+chkpt = torch.load(chkpt_name, map_location=device)
+model.load_state_dict(chkpt['model_state_dict'])
+
+diffusion_sample = diffusion_cosbeta(
+    noise_steps=1000,
+    img_size=img_size,
+    device=device,
+    s=0.008
+)
+# diffusion_sample = diffusion_sigmoidbeta(
+#     noise_steps=1000,
+#     img_size=img_size,
+#     device=device,
+#     beta_start=1e-4,
+#     beta_end=5e-3,
+#     a=8
+# )
+
+# %%
+print("Starting Evaluation")
 model.eval()
 
-diffusion = Diffusion(device = device, noise_steps = 1000, img_size = img_size, beta_start = 1e-4, beta_end = 5e-3, a = 8)
-# diffusion = Diffusion(device = device, noise_steps = 1000, img_size = img_size, beta_start = 1e-4, beta_end = 5e-3)
-diffusion.sample(model = model, test_dir = test_dir, transform = transform)
+with torch.no_grad():
+    diffusion_sample.sample(
+        model=model,
+        test_dir=dir_val,
+        transform=transform_estimate
+    )
+
+print("Evaluation Complete")
