@@ -90,6 +90,7 @@ class Diffusion:
                     x = 1/torch.sqrt(alpha)*(x-((1-alpha)/(torch.sqrt(1 - alpha_hat)))* predicted_noise) + torch.sqrt(beta)*noise 
                     
                     if i%50==0:
+                        print(i, x.mean().item(), x.std().item(), x.min().item(), x.max().item())
                         '''conversion of residual to full image'''
                         reconstructed = cond + x
                         imsx = torch.clamp(x, -1, 1).detach().cpu()
