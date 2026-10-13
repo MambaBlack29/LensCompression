@@ -2,4 +2,5 @@
 *.png
 *.pth
 *.log
+*.csv
 __pycache__
