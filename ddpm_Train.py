@@ -7,6 +7,7 @@ import numpy as np
 import torchvision.transforms as transforms
 from tqdm import tqdm
 from torch.utils.data import DataLoader
+from torchmetrics.functional.image import structural_similarity_index_measure as ssim
 from grayworldloss import grayworldloss
 from UNET import UNet
 from ddpm_Class_LinearSchedule import Diffusion as diffusion_linearbeta
@@ -50,27 +51,17 @@ dir_val = 'Dataset/valestimatesW2L'
 upattn = [False, False, False]
 downattn = [False, False, False]
 lam = 0.01
-chkpt_name = 'checkpoints/ddpm_T1000_512x512_Cosine_L2.pth'
+chkpt_name = 'checkpoints/ddpm_T1000_512x512_Linear_L2_ssim_1.pth'
 
 dataset = Wide2LongDatasetAfterInitialEstimate(dir_concatdataset = dir_concatdataset, dir_estimate = dir_estimates, transform_concatdataset = transform_concatdataset, transform_estimate = transform_estimate,
                                                transform_aug = transform_aug)
 dataloader = DataLoader(dataset = dataset, batch_size = batch_size, shuffle = True)
 
-num_epochs = 4000
+num_epochs = 3500
 model = UNet(device = device, c_in = 6, c_out = 3, time_dim = 256, upattn = upattn, downattn = downattn, img_size = img_size).to(device = device)
 
-#Load chechpoint if found
-if os.path.exists(chkpt_name):
-    print("Loading Checkpoint:", chkpt_name)
-
-    chkpt = torch.load(chkpt_name, map_location='cpu')
-    model.load_state_dict(chkpt['model_state_dict'])
-
-    del chkpt
-    torch.cuda.empty_cache()
-
-# diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
-diffusion_train = diffusion_cosinebeta(noise_steps=1000, img_size=img_size, device=device, s=0.008)
+diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
+# diffusion_train = diffusion_cosinebeta(noise_steps=1000, img_size=img_size, device=device, s=0.008)
 diffusion_sample = diffusion_sigmoidbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3, a = 8)
 l = len(dataloader)
 print('Dataset Length:', l*batch_size)
@@ -84,10 +75,25 @@ fidelity = nn.MSELoss(reduction = 'none')
 num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Model parameter Count = ", num_params)
 
+start_epoch = 0
+lowest_loss_per_epoch = float('inf')
+
+if os.path.exists(chkpt_name):
+    print("Loading Checkpoint:", chkpt_name)
+    chkpt = torch.load(chkpt_name, map_location='cpu')
+    model.load_state_dict(chkpt['model_state_dict'])
+    optimizer.load_state_dict(chkpt['optimizer_state_dict'])
+    start_epoch = chkpt['epoch'] + 1
+    lowest_loss_per_epoch = chkpt['lowest_loss_per_epoch']
+    scheduler.load_state_dict(chkpt['scheduler_state_dict'])
+
+    del chkpt
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
 # %%
 #Training Loop
-lowest_loss_per_epoch = float('inf')
-for epoch in range(num_epochs):
+for epoch in range(start_epoch, num_epochs):
     print("Epoch No: ", epoch)
     losses=[]
     without_fl=[]
@@ -124,10 +130,17 @@ for epoch in range(num_epochs):
         x0_pred = (x_t - torch.sqrt(1 - alpha_hat) * predicted_noise) / torch.sqrt(alpha_hat)
         recon = x0_pred + estimate
 
-        gamma = 0.5
-        weights = 1/((snr+1)**gamma)
-        weights = weights[:, None, None, None]
-        loss = (weights*mse).mean()
+        '''SSIM loss'''
+        loss_ssim = 1 - ssim((recon+1)/2, (GT+1)/2, data_range=1.0, reduction='elementwise_mean')
+        eta = 0.84
+
+        # gamma = 0.5
+        # weights = 1/((snr+1)**gamma)
+        # weights = weights / weights.sum()
+        # weights = weights[:, None, None, None]
+        # loss = (1-eta)*(weights*mse).mean() + eta*loss_ssim
+
+        loss = (1-eta)*(mse.mean()) + eta*loss_ssim
         # fidelity_loss = fidelity(recon, GT).mean()
         # loss = loss + grayworldloss(residual = residual)    #FOR INCORPORATING GRAY WORLD LOSS
         # without_fl.append(loss.item())
@@ -141,22 +154,29 @@ for epoch in range(num_epochs):
         optimizer.step()
         scheduler.step()
     
-    print("Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
-    # print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", np.mean(losses), "Lowest loss: ", lowest_loss_per_epoch)
-    if(np.mean(losses)<lowest_loss_per_epoch):    
-        lowest_loss_per_epoch = np.mean(losses)
-        torch.save(
-            {'epoch':epoch,
-            'model_state_dict':model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict()
-            },chkpt_name)
-        print('Checkpoint Saved')
-        # print('Starting Validaion')
-        # model.eval()
-        # diffusion_sample.sample(model = model, test_dir = dir_val, transform = transform_estimate)
-        # print("Validation Complete")
-        # model.train()
+    epoch_loss = float(np.mean(losses))
+    save_best = epoch_loss < lowest_loss_per_epoch
+    if save_best:
+        lowest_loss_per_epoch = epoch_loss
+
+    print("Loss:", epoch_loss, "Lowest loss:", lowest_loss_per_epoch)
+    # print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", epoch_loss, "Lowest loss: ", lowest_loss_per_epoch)
+
+    if save_best or epoch == 2000:
+        chkpt = {
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'lowest_loss_per_epoch': lowest_loss_per_epoch
+        }
+        if save_best:
+            torch.save(chkpt, chkpt_name)
+            print('Best Checkpoint Saved')
+        if epoch == 2000:
+            snapshot_name = os.path.splitext(chkpt_name)[0] + "_2000.pth"
+            torch.save(chkpt, snapshot_name)
+            print('Epoch 2000 Checkpoint Saved')
+        del chkpt
         
 print('DDPM Training Complete.')
-    
-# %%

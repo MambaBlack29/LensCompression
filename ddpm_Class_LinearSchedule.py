@@ -67,13 +67,14 @@ class Diffusion:
         #Defining the testset
         with torch.no_grad():
             for imgname in os.listdir(test_dir):
+                imgnum = imgname.replace(".png", "")
                 img = Image.open(os.path.join(os.path.join(test_dir, imgname))).convert("RGB")
                 img = transform(img)
                 cond = img.unsqueeze(0)
                 cond = cond.to(self.device)
                 x = torch.randn((1, 3, self.img_size, self.img_size)).to(self.device)
                 # print("x shape:", x.shape, "cond shape:", cond.shape)
-                for i in tqdm(reversed(range(0, self.noise_steps)), position = 0):
+                for i in tqdm(reversed(range(0, self.noise_steps)), position = 0, disable=True):
                     t = (torch.ones(1)*i).long().to(self.device)
                     # t = torch.full((n,), i, dtype=torch.long, device=self.device)
                     '''model will predict the residual by reverse sampling through noise steps'''
@@ -91,7 +92,8 @@ class Diffusion:
                     
                     x = 1/torch.sqrt(alpha)*(x-((1-alpha)/(torch.sqrt(1 - alpha_hat)))* predicted_noise) + torch.sqrt(beta)*noise 
                     
-                    if i==0:
+                    if i%50==0:
+                        print(i, x.mean().item(), x.std().item(), x.min().item(), x.max().item())
                         '''conversion of residual to full image'''
                         reconstructed = cond + x
                         imsx = torch.clamp(x, -1, 1).detach().cpu()
@@ -121,18 +123,18 @@ class Diffusion:
                         os.makedirs('./Generated_Samples/R', exist_ok = True)
                         os.makedirs('./Generated_Samples/G', exist_ok = True)
                         os.makedirs('./Generated_Samples/B', exist_ok = True)
-                        img.save(os.path.join('./Generated_Samples/Images', imgname))
-                        xR.save(os.path.join('./Generated_Samples/R', imgname))
-                        xG.save(os.path.join('./Generated_Samples/G', imgname))
-                        xB.save(os.path.join('./Generated_Samples/B', imgname))
+
+                        os.makedirs(f'./Generated_Samples/Images/{imgnum}', exist_ok = True)
+                        os.makedirs(f'./Generated_Samples/R/{imgnum}', exist_ok = True)
+                        os.makedirs(f'./Generated_Samples/G/{imgnum}', exist_ok = True)
+                        os.makedirs(f'./Generated_Samples/B/{imgnum}', exist_ok = True)
+                        img.save(os.path.join(f'./Generated_Samples/Images/{imgnum}', str(i) + imgname))
+                        xR.save(os.path.join(f'./Generated_Samples/R/{imgnum}', str(i) + imgname))
+                        xG.save(os.path.join(f'./Generated_Samples/G/{imgnum}', str(i) + imgname))
+                        xB.save(os.path.join(f'./Generated_Samples/B/{imgnum}', str(i) + imgname))
                         img.close()
                         xR.close()
                         xB.close()
                         xG.close()
-                        print(f"Image and RGB residuals saved for {imgname}")
-            
+                        print(f"Image and RGB residuals saved for {imgname} at t={i}")
                 
-        # model.train()
-        # x = (x.clamp(-1, 1)+1)/2
-        # x = (x*255).type(torch.uint8)
-        # return x    
