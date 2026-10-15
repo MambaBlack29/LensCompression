@@ -13,6 +13,7 @@ from UNET import UNet
 from ddpm_Class_LinearSchedule import Diffusion as diffusion_linearbeta
 from ddpm_Class_SigmoidSchedule import Diffusion as diffusion_sigmoidbeta
 from ddpm_Class_CosineSchedule import Diffusion as diffusion_cosinebeta
+from ddpm_Class_ResShiftSchedule import Diffusion as diffusion_resshift
 from dataset import Wide2LongDatasetAfterInitialEstimate
 
 #Checking for GPU support
@@ -29,7 +30,7 @@ else:
 
 # %%
 img_size = 512
-batch_size = 12
+batch_size = 8
 # transform = transforms.Compose([transforms.Resize((img_size+img_size//4)),
 #                                 transforms.RandomResizedCrop(size = (img_size, img_size), scale = (0.8, 1)),
 #                                 transforms.ToTensor(),
@@ -51,7 +52,7 @@ dir_val = 'Dataset/valestimatesW2L'
 upattn = [False, False, False]
 downattn = [False, False, False]
 lam = 0.01
-chkpt_name = 'checkpoints/ddpm_T1000_512x512_Linear_L2_ssim_1.pth'
+chkpt_name = 'checkpoints/resshift_T15_512x512_L2.pth'
 
 dataset = Wide2LongDatasetAfterInitialEstimate(dir_concatdataset = dir_concatdataset, dir_estimate = dir_estimates, transform_concatdataset = transform_concatdataset, transform_estimate = transform_estimate,
                                                transform_aug = transform_aug)
@@ -60,9 +61,7 @@ dataloader = DataLoader(dataset = dataset, batch_size = batch_size, shuffle = Tr
 num_epochs = 3500
 model = UNet(device = device, c_in = 6, c_out = 3, time_dim = 256, upattn = upattn, downattn = downattn, img_size = img_size).to(device = device)
 
-diffusion_train  = diffusion_linearbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3)
-# diffusion_train = diffusion_cosinebeta(noise_steps=1000, img_size=img_size, device=device, s=0.008)
-diffusion_sample = diffusion_sigmoidbeta(noise_steps = 1000, img_size = img_size, device = device, beta_start = 1e-4, beta_end = 5e-3, a = 8)
+diffusion_train = diffusion_resshift(noise_steps=15, img_size=img_size, device=device, kappa=2.0, p=0.3, eta_end=0.999)
 l = len(dataloader)
 print('Dataset Length:', l*batch_size)
 
@@ -101,51 +100,14 @@ for epoch in range(start_epoch, num_epochs):
     # pbar = tqdm(dataloader)
     pbar = dataloader
     for i, images in enumerate(pbar):
-        # images = images.to(device)
-        # t = diffusion.sample_timesteps(n = images.shape[0]).to(device)
-        # x_t, noise = diffusion.noise_images(images, t)
-        # predicted_noise = model(x_t, t)
         estimate, GT = images
         estimate = estimate.float().to(device)
         GT = GT.float().to(device)
 
-        '''Compute residual'''
-        residual = (GT - estimate)  #[-1, 1] range
-        '''Sample timestep'''
-        t = diffusion_train.sample_timesteps(n = estimate.shape[0]).to(device)
-        '''We would now want to noise the residual'''
-        x_t, noise = diffusion_train.noise_images(residual, t)
-        
-        '''Now the model shall predict the residual noise'''
-        predicted_noise = model(torch.concat([x_t, estimate], dim = 1), t)
-        mse = criterion(noise, predicted_noise) #per pixel L1 or mse
-
-        '''Compute SNR'''
-        alpha_hat = diffusion_train.return_alpha_hat()
-        alpha_hat = alpha_hat[t]
-        snr = alpha_hat/(1 - alpha_hat) #shape: (B,)
-
-        '''Reconstruct the image'''
-        alpha_hat = alpha_hat.view(-1, 1, 1, 1)
-        x0_pred = (x_t - torch.sqrt(1 - alpha_hat) * predicted_noise) / torch.sqrt(alpha_hat)
-        recon = x0_pred + estimate
-
-        '''SSIM loss'''
-        loss_ssim = 1 - ssim((recon+1)/2, (GT+1)/2, data_range=1.0, reduction='elementwise_mean')
-        eta = 0.84
-
-        # gamma = 0.5
-        # weights = 1/((snr+1)**gamma)
-        # weights = weights / weights.sum()
-        # weights = weights[:, None, None, None]
-        # loss = (1-eta)*(weights*mse).mean() + eta*loss_ssim
-
-        loss = (1-eta)*(mse.mean()) + eta*loss_ssim
-        # fidelity_loss = fidelity(recon, GT).mean()
-        # loss = loss + grayworldloss(residual = residual)    #FOR INCORPORATING GRAY WORLD LOSS
-        # without_fl.append(loss.item())
-        # fl.append(lam*fidelity_loss.item())
-        # loss = loss + lam*fidelity_loss    #FOR INCORPORATING FIDELITY LOSS
+        t = diffusion_train.sample_timesteps(n=estimate.shape[0])
+        x_t, _ = diffusion_train.noise_images(GT, estimate, t)
+        predicted_GT = model(torch.cat([x_t, estimate], dim=1), t)
+        loss = criterion(predicted_GT, GT).mean()
 
         losses.append(loss.item())
         
@@ -160,7 +122,6 @@ for epoch in range(start_epoch, num_epochs):
         lowest_loss_per_epoch = epoch_loss
 
     print("Loss:", epoch_loss, "Lowest loss:", lowest_loss_per_epoch)
-    # print("Non-FL Loss: ", np.mean(without_fl), "Fidelity Loss: ", np.mean(fl), "Loss: ", epoch_loss, "Lowest loss: ", lowest_loss_per_epoch)
 
     if save_best or epoch == 2000:
         chkpt = {
@@ -179,4 +140,4 @@ for epoch in range(start_epoch, num_epochs):
             print('Epoch 2000 Checkpoint Saved')
         del chkpt
         
-print('DDPM Training Complete.')
+print('ResShift Training Complete.')
