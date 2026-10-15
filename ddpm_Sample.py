@@ -6,6 +6,7 @@ from UNET import UNet
 from ddpm_Class_CosineSchedule import Diffusion as diffusion_cosbeta
 from ddpm_Class_SigmoidSchedule import Diffusion as diffusion_sigmoidbeta
 from ddpm_Class_LinearSchedule import Diffusion as diffusion_linearbeta
+from ddpm_Class_ResShiftSchedule import Diffusion as diffusion_resshift
 
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
@@ -17,7 +18,9 @@ else:
 # %%
 img_size = 512
 dir_val = 'Dataset/testestimatesW2L'
-chkpt_name = 'checkpoints/ddpm_T1000_512x512_Linear_L2_ssim_1_2000.pth'
+method = 'resshift'  # 'ddpm' keeps the existing sampling path
+chkpt_name = ('checkpoints/resshift_T15_512x512_MSE.pth' if method == 'resshift'
+              else 'checkpoints/ddpm_T1000_512x512_Linear_L2_ssim_1_2000.pth')
 
 upattn = [False, False, False]
 downattn = [False, False, False]
@@ -45,27 +48,31 @@ print("Loading Checkpoint:", chkpt_name)
 chkpt = torch.load(chkpt_name, map_location=device)
 model.load_state_dict(chkpt['model_state_dict'])
 
-# diffusion_sample = diffusion_cosbeta(
-#     noise_steps=1000,
-#     img_size=img_size,
-#     device=device,
-#     s=0.008
-# )
-diffusion_sample = diffusion_sigmoidbeta(
-    noise_steps=1000,
-    img_size=img_size,
-    device=device,
-    beta_start=1e-4,
-    beta_end=5e-3,
-    a=8
-)
-# diffusion_sample = diffusion_linearbeta(
-#     noise_steps=1000,
-#     img_size=img_size,
-#     device=device,
-#     beta_start=1e-4,
-#     beta_end=5e-3
-# )
+if method == 'resshift':
+    diffusion_sample = diffusion_resshift(noise_steps=15, img_size=img_size, device=device,
+                                          kappa=2.0, p=0.3, eta_end=0.999)
+else:
+    # diffusion_sample = diffusion_cosbeta(
+    #     noise_steps=1000,
+    #     img_size=img_size,
+    #     device=device,
+    #     s=0.008
+    # )
+    diffusion_sample = diffusion_sigmoidbeta(
+        noise_steps=1000,
+        img_size=img_size,
+        device=device,
+        beta_start=1e-4,
+        beta_end=5e-3,
+        a=8
+    )
+    # diffusion_sample = diffusion_linearbeta(
+    #     noise_steps=1000,
+    #     img_size=img_size,
+    #     device=device,
+    #     beta_start=1e-4,
+    #     beta_end=5e-3
+    # )
 
 # %%
 print("Starting Evaluation")
