@@ -7,7 +7,7 @@ from torchvision.transforms.functional import to_pil_image
 
 
 class Diffusion:
-    """ResShift diffusion between a clean image and its initial estimate."""
+    """ResShift diffusion from the clean residual toward zero."""
 
     def __init__(self, device, noise_steps=15, img_size=512, kappa=2.0, p=0.3, eta_end=0.999):
         if noise_steps < 2 or kappa <= 0 or p <= 0 or not 0 < eta_end < 1:
@@ -55,21 +55,22 @@ class Diffusion:
                 with Image.open(os.path.join(test_dir, imgname)) as image:
                     estimate = transform(image.convert("RGB")).unsqueeze(0).to(self.device)
 
-                x_t = estimate + self.kappa * torch.randn_like(estimate)
+                residual_t = self.kappa * torch.randn_like(estimate)
                 for step in range(self.noise_steps, 0, -1):
                     t = torch.full((1,), step, dtype=torch.long, device=self.device)
-                    x0_hat = model(torch.cat([x_t, estimate], dim=1), t)
+                    residual_0_hat = model(torch.cat([residual_t, estimate], dim=1), t)
 
                     eta_t = self.eta[step]
                     eta_prev = self.eta[step - 1]
                     delta_t = self.delta[step - 1]
-                    mean = (eta_prev / eta_t) * x_t + (delta_t / eta_t) * x0_hat
+                    mean = (eta_prev / eta_t) * residual_t + (delta_t / eta_t) * residual_0_hat
 
                     if step > 1:
                         variance = self.kappa**2 * (eta_prev / eta_t) * delta_t
-                        x_t = mean + torch.sqrt(variance) * torch.randn_like(x_t)
+                        residual_t = mean + torch.sqrt(variance) * torch.randn_like(residual_t)
                     else:
-                        x_t = mean
+                        residual_t = mean
 
-                result = ((x_t.clamp(-1, 1) + 1) / 2).squeeze(0).cpu()
+                restored = estimate + residual_t
+                result = ((restored.clamp(-1, 1) + 1) / 2).squeeze(0).cpu()
                 to_pil_image(result).save(os.path.join(output_dir, imgname))

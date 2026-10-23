@@ -19,7 +19,7 @@ else:
 img_size = 512
 dir_val = 'Dataset/testestimatesW2L'
 method = 'resshift'  # 'ddpm' keeps the existing sampling path
-chkpt_name = ('checkpoints/resshift_T15_512x512_L2_2_2530.pth' if method == 'resshift'
+chkpt_name = ('checkpoints/resshift_residual_T30_512x512_L2.pth' if method == 'resshift'
               else 'checkpoints/ddpm_T1000_512x512_Linear_L2_ssim_1_2000.pth')
 
 upattn = [False, False, False]

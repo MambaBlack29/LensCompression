@@ -30,7 +30,7 @@ else:
 
 # %%
 img_size = 512
-batch_size = 12
+batch_size = 6
 # transform = transforms.Compose([transforms.Resize((img_size+img_size//4)),
 #                                 transforms.RandomResizedCrop(size = (img_size, img_size), scale = (0.8, 1)),
 #                                 transforms.ToTensor(),
@@ -52,7 +52,7 @@ dir_val = 'Dataset/valestimatesW2L'
 upattn = [False, False, False]
 downattn = [False, False, False]
 lam = 0.01
-chkpt_name = 'checkpoints/resshift_T15_512x512_L2_3.pth'
+chkpt_name = 'checkpoints/resshift_residual_T30_512x512_L2.pth'
 
 dataset = Wide2LongDatasetAfterInitialEstimate(dir_concatdataset = dir_concatdataset, dir_estimate = dir_estimates, transform_concatdataset = transform_concatdataset, transform_estimate = transform_estimate,
                                                transform_aug = transform_aug)
@@ -61,7 +61,7 @@ dataloader = DataLoader(dataset = dataset, batch_size = batch_size, shuffle = Tr
 num_epochs = 3500
 model = UNet(device = device, c_in = 6, c_out = 3, time_dim = 256, upattn = upattn, downattn = downattn, img_size = img_size).to(device = device)
 
-diffusion_train = diffusion_resshift(noise_steps=30, img_size=img_size, device=device, kappa=2.0, p=0.3, eta_end=0.999)
+diffusion_train = diffusion_resshift(noise_steps=15, img_size=img_size, device=device, kappa=2.0, p=0.3, eta_end=0.999)
 l = len(dataloader)
 print('Dataset Length:', l*batch_size)
 
@@ -104,10 +104,13 @@ for epoch in range(start_epoch, num_epochs):
         estimate = estimate.float().to(device)
         GT = GT.float().to(device)
 
+        # GT and estimate are in [-1, 1]; their residual can span [-2, 2].
+        # The noisy residual and model prediction remain unclamped.
+        residual = GT - estimate
         t = diffusion_train.sample_timesteps(n=estimate.shape[0])
-        x_t, _ = diffusion_train.noise_images(GT, estimate, t)
-        predicted_GT = model(torch.cat([x_t, estimate], dim=1), t)
-        loss = criterion(predicted_GT, GT).mean()
+        r_t, _ = diffusion_train.noise_images(residual, torch.zeros_like(residual), t)
+        predicted_residual = model(torch.cat([r_t, estimate], dim=1), t)
+        loss = criterion(predicted_residual, residual).mean()
 
         losses.append(loss.item())
         
@@ -123,7 +126,7 @@ for epoch in range(start_epoch, num_epochs):
 
     print("Loss:", epoch_loss, "Lowest loss:", lowest_loss_per_epoch)
 
-    if save_best or epoch == 2500:
+    if save_best or epoch == 2000:
         chkpt = {
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
