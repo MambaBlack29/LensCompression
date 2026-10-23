@@ -7,13 +7,22 @@ from torchmetrics.functional.image import structural_similarity_index_measure as
 from tqdm import tqdm
 
 class GeneratedDataset(Dataset):
-    def __init__(self, dir_gt, dir_generated, dir_sample):
+    def __init__(self, dir_gt, dir_generated, dir_sample, method):
         self.pairs, self.transform = [], ToTensor()
-        for folder in sorted(os.listdir(dir_generated)):
-            num = folder.removeprefix("output")
-            if not folder.startswith("output") or not num.isdigit() or int(num) < 501:
+        if method not in ("ddpm", "resshift"):
+            raise ValueError(f"Unknown method: {method}")
+        for entry in sorted(os.listdir(dir_generated)):
+            if method == "resshift":
+                filename, extension = os.path.splitext(entry)
+                num = filename.removeprefix("output")
+                generated = os.path.join(dir_generated, entry)
+                if extension.lower() != ".png":
+                    continue
+            else:
+                num = entry.removeprefix("output")
+                generated = os.path.join(dir_generated, entry, f"0{entry}.png")
+            if not entry.startswith("output") or not num.isdigit() or int(num) < 501:
                 continue
-            generated = os.path.join(dir_generated, folder, f"0{folder}.png")
             if not os.path.isfile(generated):
                 continue
             gt = os.path.join(dir_gt, f"img{num}.jpg")
@@ -37,12 +46,13 @@ class GeneratedDataset(Dataset):
         return generated, sample, gt
 
 dir_gt = "Dataset/f2fGT"
-# dir_generated = "outputs/Generated_Samples_3_1524/Images"
-dir_generated = "Generated_Samples/Images"
+method = "resshift"  # Use "ddpm" for Generated_Samples/Images/outputN/0outputN.png
+dir_generated = ("Generated_Samples/ResShift" if method == "resshift"
+                 else "Generated_Samples/Images")
 dir_sample = "Dataset/testestimatesW2L"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-dataset = GeneratedDataset(dir_gt, dir_generated, dir_sample)
+dataset = GeneratedDataset(dir_gt, dir_generated, dir_sample, method)
 if not len(dataset):
     raise ValueError("No generated images numbered 501 onwards found.")
 dataloader = DataLoader(dataset, batch_size=12, shuffle=False)
@@ -68,3 +78,4 @@ for name, (ssim_sum, psnr_sum) in scores.items():
     print(f"(pred, {name}) Mean SSIM: {ssim_sum / count:.6f}, Mean PSNR: {psnr_sum / count:.4f} dB")
 
 print(f"(sample, gt) Mean SSIM: {sample_gt_score[0] / count:.6f}, Mean PSNR: {sample_gt_score[1] / count:.4f} dB")
+method
